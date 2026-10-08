@@ -3,7 +3,7 @@ import numpy as np
 
 def make_car(desired_v:float=20.0, dt:float=0.1) -> dict:
     """ 
-    Generates a dictionary that holds all the car's values. Keeps track of state varaibles.
+    Generates a dictionary that holds all the car's values. Keeps track of state variables.
     """
     car_state_dictionary : dict[str, float] = {
         "v" : 0, #velocity of your car 
@@ -28,6 +28,9 @@ def update(car: dict, throttle_perc: float, mass: float = 1000, max_throttle_for
         Inputs:
         car: dictionary containing the car's state variables
         throttle_perc: float, throttle percentage (-1 to 1)
+        mass: float, mass of the car in kg
+        max_throttle_force: float, maximum force the motor can produce in N
+        friction: float, friction deceleration in m/s^2
 
         Outputs:
         None, but updates the car's state variables
@@ -47,19 +50,22 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
         desired acceleration = K_P * error + K_I * net_integral + K_D * (de / dt).
         Includes anti-windup (conditional integration): the integral only accumulates when doing so
         won't ask for more than the motor's max acceleration, which prevents overshoot from
-        the integral building up while the throttle is fully saturated.
+        the integral building up while the throttle is maxed out.
         
         Inputs:
         car: dictionary containing the car's state variables 
              (uses car["v"], car["desired_v"], car["dt"], car["net_integral"], car["error_prev"])
-        K_P: float, proportional gain, scales how strongly the controller reacts to the current error
-        K_I: float, integral gain, scales how strongly the controller reacts to the accumulated past error
-        K_D: float, derivative gain, scales how strongly the controller reacts to the rate of change of the error
+        K_P: float, proportional gain, scales how much the controller reacts to the current error
+        K_I: float, integral gain, scales how much the controller reacts to the accumulated past error
+        K_D: float, derivative gain, scales how much the controller reacts to the rate of change of the error
 
         Outputs:
         tuple (acceleration_desired, error):
                 acceleration_desired: float, desired acceleration in m/s^2 (positive = speed up, negative = slow down)
                 error: float, desired velocity minus current velocity in m/s
+
+        Side effects:
+        Updates car["error_prev"] every step, and car["net_integral"] when not saturated.
         """
 
         error = car["desired_v"] - car["v"] # desired - actual: positive error = speed up
@@ -70,7 +76,7 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
                 derivative = (error - car["error_prev"]) / car["dt"] # de/dt
         car["error_prev"] = error # save for next iteration
 
-        # calculate the PD terms (don't depend on integral decision)
+        # calculate the P & D terms (they don't depend on integral decision)
         pd_terms = K_P * error + K_D * derivative
 
         
@@ -80,7 +86,7 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
         if abs(pd_terms + K_I * trial_integral) < 5.0:
                 car["net_integral"] = trial_integral
 
-        # incorporate integral decision into full PID command
+        # include integral decision into full PID command
         acceleration_desired = pd_terms + K_I * car["net_integral"]
         return acceleration_desired, error
 
@@ -96,7 +102,7 @@ def acceleration_to_throttle_percentage(acceleration_desired: float, mass: float
         max_throttle_force: float, maximum force the motor can produce in N
 
         Outputs:
-        throttle_perc: float, fraction of max_throttle_force to apply, from range -100% to 100%
+        throttle_perc: float, fraction of max_throttle_force to apply, from range -1.0 to 1.0 (-100% to 100%)
 
         Raises:
         ValueError: if mass or max_throttle_force is not positive
@@ -107,5 +113,5 @@ def acceleration_to_throttle_percentage(acceleration_desired: float, mass: float
                 raise ValueError("mass and max_throttle_force must be positive")
 
         max_acceleration = max_throttle_force / mass  # Newton's 2nd law: a = F/m
-        throttle__perc = acceleration_desired / max_acceleration
-        return float(np.clip(throttle__perc, -1.0, 1.0))  # set throttle_perc range from -100% to 100%
+        throttle_perc = acceleration_desired / max_acceleration
+        return float(np.clip(throttle_perc, -1.0, 1.0))  # set throttle_perc range from -1.0 to 1.0 (-100% to 100%)
