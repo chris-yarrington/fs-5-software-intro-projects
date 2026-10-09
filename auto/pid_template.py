@@ -9,7 +9,7 @@ def make_car(desired_v:float=20.0, dt:float=0.1) -> dict:
     ValueError: if dt is not positive
     """
 
-    # Check for a valid time step (0 would divide by zero in the derivative, negative would run time backwards)
+    # Check for a valid time step
     if dt <= 0:
         raise ValueError("dt must be positive")
     
@@ -79,7 +79,7 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
         ValueError: if any of the gains (K_P, K_I, K_D) are not positive
         """
 
-        # Check for valid gains (0 is allowed, e.g. K_I = 0 for a PD controller)
+        # Check for valid gains
         if K_P < 0 or K_I < 0 or K_D < 0:
                 raise ValueError("K_P, K_I and K_D must not be negative")
 
