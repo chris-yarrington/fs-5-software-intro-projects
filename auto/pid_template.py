@@ -4,7 +4,15 @@ import numpy as np
 def make_car(desired_v:float=20.0, dt:float=0.1) -> dict:
     """ 
     Generates a dictionary that holds all the car's values. Keeps track of state variables.
+
+    Raises:
+    ValueError: if dt is not positive
     """
+
+    # Check for a valid time step (0 would divide by zero in the derivative, negative would run time backwards)
+    if dt <= 0:
+        raise ValueError("dt must be positive")
+    
     car_state_dictionary : dict[str, float] = {
         "v" : 0, #velocity of your car 
         "a" : 0, #acceleration of your car
@@ -66,7 +74,14 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
 
         Side effects:
         Updates car["error_prev"] every step, and car["net_integral"] when not saturated.
+
+        Raises:
+        ValueError: if any of the gains (K_P, K_I, K_D) are not positive
         """
+
+        # Check for valid gains (0 is allowed, e.g. K_I = 0 for a PD controller)
+        if K_P < 0 or K_I < 0 or K_D < 0:
+                raise ValueError("K_P, K_I and K_D must not be negative")
 
         error = car["desired_v"] - car["v"] # desired - actual: positive error = speed up
 
