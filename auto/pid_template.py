@@ -1,4 +1,5 @@
 import numpy as np
+from typing import Optional
 
 
 def make_car(desired_v:float=20.0, dt:float=0.1) -> dict:
@@ -24,9 +25,11 @@ def make_car(desired_v:float=20.0, dt:float=0.1) -> dict:
     
         #hint: use these variables in the integral and derivative portion of your PID control (steps 5 and 6 )
         "error_prev" : None,
-        "net_integral" : 0.0
+        "net_integral" : 0.0,
+        "d_filtered" : 0.0   # low pass filtered derivative
     }
     return car_state_dictionary
+
 
 def update(car: dict, throttle_perc: float, mass: float = 1000, max_throttle_force: float = 5000, friction: float = 2.0) -> None:
         """
@@ -51,7 +54,29 @@ def update(car: dict, throttle_perc: float, mass: float = 1000, max_throttle_for
         car["step"] += 1
 
 
-def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D: float = 0.0) -> tuple[float, float]:
+def measure_velocity(car: dict, noise_std: float, rng: np.random.Generator) -> float:
+    """
+    Simulates a speed sensor: returns the car's true velocity plus random noise.
+ 
+    Inputs:
+    car: dictionary containing the car's state variables (uses car["v"])
+    noise_std: float, standard deviation of the sensor noise in m/s (0 = perfect sensor)
+    rng: numpy random generator, so runs with the same seed give the same noise
+ 
+    Outputs:
+    measured_v: float, noisy velocity reading in m/s
+ 
+    Raises:
+    ValueError: if noise_std is negative
+    """
+    if noise_std < 0:
+        raise ValueError("noise_std must not be negative")
+ 
+    return car["v"] + rng.normal(0.0, noise_std)
+
+
+def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D: float = 0.0, 
+                                   measured_v: Optional[float] = None, d_filter_tau: float = 0.0) -> tuple[float, float]:
         """
         Calculates the velocity error and desired acceleration of the car to
         bring the car's velocity toward the desired velocity.
@@ -59,13 +84,16 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
         Includes anti-windup (conditional integration): the integral only accumulates when doing so
         won't ask for more than the motor's max acceleration, which prevents overshoot from
         the integral building up while the throttle is maxed out.
+        The derivative is passed through a low-pass filter to minimize noise.
         
         Inputs:
         car: dictionary containing the car's state variables 
-             (uses car["v"], car["desired_v"], car["dt"], car["net_integral"], car["error_prev"])
+             (uses car["v"], car["desired_v"], car["dt"], car["net_integral"], car["error_prev"], car["d_filtered"])
         K_P: float, proportional gain, scales how much the controller reacts to the current error
         K_I: float, integral gain, scales how much the controller reacts to the accumulated past error
         K_D: float, derivative gain, scales how much the controller reacts to the rate of change of the error
+        measured_v: float or None, velocity reading from the sensor in m/s (None = use true velocity car["v"])
+        d_filter_tau: float, derivative time constant in s (0 = no filter, large = smoother but slower)
 
         Outputs:
         tuple (acceleration_desired, error):
@@ -76,25 +104,35 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
         Updates car["error_prev"] every step, and car["net_integral"] when not saturated.
 
         Raises:
-        ValueError: if any of the gains (K_P, K_I, K_D) are not positive
+        ValueError: if any of the gains (K_P, K_I, K_D) or d_filter_tau are not positive
         """
 
-        # Check for valid gains
+        # Check for valid gains and deriv filter
         if K_P < 0 or K_I < 0 or K_D < 0:
                 raise ValueError("K_P, K_I and K_D must not be negative")
+        if d_filter_tau < 0:
+                raise ValueError("d_filter_tau must not be negative")
 
-        error = car["desired_v"] - car["v"] # desired - actual: positive error = speed up
+        # controller only knows what sensor reports
+        if measured_v is None:
+                measured_v = car["v"]
+        
+        error = car["desired_v"] - measured_v # desired - actual: positive error = speed up
 
         if car["error_prev"] is None: #first iteration has no prev error, so skip derivative
-                derivative = 0.0
+                raw_derivative = 0.0
         else:
-                derivative = (error - car["error_prev"]) / car["dt"] # de/dt
+                raw_derivative = (error - car["error_prev"]) / car["dt"] # de/dt
         car["error_prev"] = error # save for next iteration
 
-        # calculate the P & D terms (they don't depend on integral decision)
-        pd_terms = K_P * error + K_D * derivative
+        # apply low-pass filter to derivative: blend this step's raw derivative with the previous filtered value
+        # alpha = 1 (tau = 0) means no filtering, smaller alpha means new reading has less impact on overall term
+        alpha = car["dt"] / (d_filter_tau + car["dt"])
+        car["d_filtered"] = alpha * raw_derivative + (1 - alpha) * car["d_filtered"]
 
-        
+        # calculate the P & D terms (they don't depend on integral decision)
+        pd_terms = K_P * error + K_D * car["d_filtered"]
+
         # Integral with anti-windup (conditional integration): only accept this step's integral if the
         # result wouldn't ask for more than the motor's max acceleration (5000 N / 1000 kg)
         trial_integral = car["net_integral"] + error * car["dt"]
@@ -104,7 +142,6 @@ def calculate_desired_acceleration(car: dict, K_P: float, K_I: float = 0.0, K_D:
         # include integral decision into full PID command
         acceleration_desired = pd_terms + K_I * car["net_integral"]
         return acceleration_desired, error
-
 
 
 def acceleration_to_throttle_percentage(acceleration_desired: float, mass: float = 1000, max_throttle_force: float = 5000) -> float:

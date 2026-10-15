@@ -29,10 +29,14 @@ Run the simulation:
     Mac:     python3 run_template.py
     Windows: py run_template.py
 
-The gains (K_P, K_I, K_D), run time (STEPS and DT), target velocity (DESIRED_V), and friction changes (FRICTION_SCHEDULE) can all be edited at the top of run_template.py.
+The gains (K_P, K_I, K_D), run time (STEPS and DT), target velocity (DESIRED_V), velocity sensor settings (NOISE_STD, D_FILTER_TAU, SEED), and friction changes (FRICTION_SCHEDULE) can all be edited at the top of run_template.py.
 
 ## Extensions
 
 Anti-windup: the integral term stops building up while the throttle is at 100%. This removes the overshoot the car had when speeding up to the target.
 
 Variable friction: friction changes at set times during the run. The controller quickly adjusts and brings the velocity back to the target.
+
+Velocity sensor noise: at each time step, a simulated velocity sensor adds a small random error to the reading to model real-life sensor noise. NOISE_STD sets how large the noise is (0 = perfect sensor), and SEED makes the random noise the same every run so results can be compared.
+
+Derivative filter: the derivative term is smoothed with a low-pass filter to minimize fluctuations from sensor noise. D_FILTER_TAU sets how much smoothing is used, in seconds (0 = no filtering). A larger value gives a smoother throttle but makes the derivative react more slowly.
